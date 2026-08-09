@@ -577,7 +577,7 @@
     return `<div class="q-block" data-q="${uid}" data-multi="${multi ? 1 : 0}">
       <div class="q-text">${esc(q.q)}${multi ? `<span class="q-multi">SELECT ${q.answer.length === 2 ? "TWO" : q.answer.length}</span>` : ""}</div>
       <div class="opts">
-        ${q.options.map((o, i) => `<button class="opt" data-i="${i}"><span class="key">${KEYS[i]}</span><span>${esc(o)}</span></button>`).join("")}
+        ${shuffled(q.options.map((_, i) => i)).map((oi, pos) => `<button class="opt" data-i="${oi}"><span class="key">${KEYS[pos]}</span><span>${esc(q.options[oi])}</span></button>`).join("")}
       </div>
       <div class="q-actions">
         ${multi ? `<button class="btn sm" data-check>Check answer</button>` : ""}
@@ -659,6 +659,7 @@
   const runExam = (exam, ch, content) => {
     const qs = shuffled(content.exam.questions);
     const answers = qs.map(() => new Set());
+    const orders = qs.map((q) => shuffled(q.options.map((_, i) => i))); // stable option shuffle per question
     let idx = 0;
 
     const paint = () => {
@@ -675,7 +676,7 @@
           <div class="card" style="padding:28px">
             <div class="runner-q">${esc(q.q)}${multi ? `<span class="q-multi" style="display:block;margin-top:6px;font-size:.78rem;color:var(--warn)">SELECT ${q.answer.length === 2 ? "TWO" : q.answer.length}</span>` : ""}</div>
             <div class="opts">
-              ${q.options.map((o, i) => `<button class="opt ${sel.has(i) ? "selected" : ""}" data-i="${i}"><span class="key">${KEYS[i]}</span><span>${esc(o)}</span></button>`).join("")}
+              ${orders[idx].map((oi, pos) => `<button class="opt ${sel.has(oi) ? "selected" : ""}" data-i="${oi}"><span class="key">${KEYS[pos]}</span><span>${esc(q.options[oi])}</span></button>`).join("")}
             </div>
             <div class="runner-nav">
               <button class="btn" id="prevQ" ${idx === 0 ? "disabled" : ""}>← Previous</button>
