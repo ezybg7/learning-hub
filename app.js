@@ -396,16 +396,18 @@
 
   const paintChapter = (exam, ch, content) => {
     const st = chState(exam.id, ch.id);
+    const isCheck = ch.kind === "checkpoint";
     const totalMin = content.bursts.reduce((s, b) => s + (b.minutes || 5), 0);
 
     setView(`
-      <nav class="crumbs"><a href="#/">Home</a><span class="sep">/</span><a href="#/exam/${exam.id}">${esc(exam.short)}</a><span class="sep">/</span><span>Chapter ${ch.num}</span></nav>
+      <nav class="crumbs"><a href="#/">Home</a><span class="sep">/</span><a href="#/exam/${exam.id}">${esc(exam.short)}</a><span class="sep">/</span><span>${isCheck ? esc(ch.title) : `Chapter ${ch.num}`}</span></nav>
       <header class="chapter-head">
-        <h1>Chapter ${ch.num} — ${esc(content.title)}</h1>
+        <h1>${isCheck ? `${ch.icon || "🏁"} ${esc(content.title)}` : `Chapter ${ch.num} — ${esc(content.title)}`}</h1>
         <div class="ch-meta">
           <span class="chip accent">${esc(ch.day)}</span>
-          <span class="chip">${content.bursts.length} bursts</span>
-          <span class="chip">~${totalMin} min</span>
+          ${isCheck
+            ? `<span class="chip">${content.exam.questions.length} questions</span><span class="chip">pass ≥ ${content.exam.passPct}%</span>`
+            : `<span class="chip">${content.bursts.length} bursts</span><span class="chip">~${totalMin} min</span>`}
           ${st.best != null ? `<span class="chip ok">Best exam score: ${st.best}%</span>` : ""}
         </div>
         <div class="chapter-progressbar">
@@ -455,11 +457,18 @@
     const activeIdx = content.bursts.findIndex((b) => !st.bursts[b.id]);
 
     /* progress bar */
+    const isCheck = ch.kind === "checkpoint";
     const prog = document.getElementById("chProg");
-    const shownPct = st.done ? 100 : Math.round((doneN / content.bursts.length) * 80);
+    const shownPct = st.done ? 100
+      : content.bursts.length ? Math.round((doneN / content.bursts.length) * 80)
+      : st.best != null ? Math.min(st.best, 99) : 0;
     if (prog) prog.style.width = shownPct + "%";
     const lbl = document.getElementById("chProgLabel");
-    if (lbl) lbl.textContent = st.done ? "Chapter complete 🎉" : `${doneN}/${content.bursts.length} bursts · exam ${st.best != null ? "best " + st.best + "%" : "locked"}`;
+    if (lbl) lbl.textContent = st.done
+      ? (isCheck ? "Passed 🎉" : "Chapter complete 🎉")
+      : isCheck
+        ? (st.best != null ? `best ${st.best}% — pass at ${content.exam.passPct}%` : "no bursts here — straight to the questions")
+        : `${doneN}/${content.bursts.length} bursts · exam ${st.best != null ? "best " + st.best + "%" : "locked"}`;
 
     wrap.innerHTML = content.bursts.map((b, i) => {
       const done = !!st.bursts[b.id];
@@ -495,18 +504,18 @@
     const after = document.getElementById("afterBursts");
     after.innerHTML = `
       <div class="card overview-card">
-        <h3>📌 Chapter overview — the points that matter
+        <h3>📌 ${isCheck ? "What this exam covers" : "Chapter overview — the points that matter"}
           ${TTS.available ? `<button class="listen-btn" data-listen-overview title="Listen">${TTS.icon}</button>` : ""}
         </h3>
         <ul>${content.overview.map((p) => `<li>${p}</li>`).join("")}</ul>
       </div>
       <div class="card exam-cta">
         <div>
-          <h3>Chapter ${ch.num} Exam</h3>
+          <h3>${isCheck ? esc(content.title) : `Chapter ${ch.num} Exam`}</h3>
           <p>${content.exam.questions.length} exam-style questions · pass at ${content.exam.passPct}% · no peeking back at the lessons</p>
         </div>
         ${allDone
-          ? `<button class="btn primary" id="startExam">${st.best != null ? "Retake exam" : "Start chapter exam"} →</button>`
+          ? `<button class="btn primary" id="startExam">${st.best != null ? "Retake exam" : isCheck ? "Start exam" : "Start chapter exam"} →</button>`
           : `<span class="locked-note">🔒 Finish all ${content.bursts.length} bursts to unlock</span>`}
       </div>`;
 
@@ -538,7 +547,7 @@
       }));
     const ovBtn = after.querySelector("[data-listen-overview]");
     if (ovBtn) ovBtn.addEventListener("click", () =>
-      TTS.toggle(ovBtn, content.overview.join(". "), `Chapter ${ch.num} overview. The points that matter`));
+      TTS.toggle(ovBtn, content.overview.join(". "), isCheck ? `${content.title}. What it covers` : `Chapter ${ch.num} overview. The points that matter`));
 
     wireQuizzes(wrap, content, (burstId) => {
       /* called when a whole burst quiz is fully correct */
