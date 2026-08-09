@@ -80,6 +80,99 @@
     return a;
   };
 
+  /* ---------------- text-to-speech ---------------- */
+  const TTS = (() => {
+    const synth = window.speechSynthesis || null;
+    let voices = [];
+    let queue = [];
+    let speaking = false;
+    let paused = false;
+    let currentBtn = null;
+
+    S.tts = S.tts || { rate: 1, voice: null };
+
+    const ICONS = {
+      idle: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+      speaking: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1.4"/><rect x="14" y="5" width="4" height="14" rx="1.4"/></svg>',
+      paused: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>',
+    };
+
+    const loadVoices = () => {
+      if (!synth) return;
+      const all = synth.getVoices();
+      voices = all.filter((v) => v.lang && v.lang.toLowerCase().startsWith("en"));
+      if (!voices.length) voices = all;
+      const sel = document.getElementById("ttsVoice");
+      if (sel && voices.length) {
+        sel.innerHTML = voices.map((v) =>
+          `<option value="${esc(v.name)}" ${v.name === S.tts.voice ? "selected" : ""}>${esc(v.name.replace(/\s*\(.+\)$/, ""))}</option>`).join("");
+        if (!voices.some((v) => v.name === S.tts.voice)) sel.value = (pickVoice() || {}).name || "";
+      }
+    };
+    if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
+
+    const pickVoice = () =>
+      voices.find((v) => v.name === S.tts.voice) ||
+      voices.find((v) => /samantha|google us english/i.test(v.name)) ||
+      voices.find((v) => v.lang === "en-US") ||
+      voices[0] || null;
+
+    const toChunks = (text) =>
+      (text.match(/[^.!?…]+[.!?…]+\s*|[^.!?…]+$/g) || [text]).map((s) => s.trim()).filter(Boolean);
+
+    const htmlToText = (html) => {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      return tmp.innerText.replace(/\s+/g, " ").trim();
+    };
+
+    const paint = () => {
+      if (!currentBtn) return;
+      currentBtn.classList.toggle("speaking", speaking && !paused);
+      currentBtn.innerHTML = paused ? ICONS.paused : speaking ? ICONS.speaking : ICONS.idle;
+      currentBtn.title = paused ? "Resume" : speaking ? "Pause" : "Listen";
+    };
+
+    const speakNext = () => {
+      if (!queue.length) { stop(); return; }
+      const u = new SpeechSynthesisUtterance(queue.shift());
+      const v = pickVoice();
+      if (v) u.voice = v;
+      u.rate = S.tts.rate || 1;
+      u.onend = () => { if (speaking && !paused) speakNext(); };
+      u.onerror = () => { if (speaking) speakNext(); };
+      synth.speak(u);
+    };
+
+    const stop = () => {
+      if (!synth) return;
+      speaking = false; paused = false; queue = [];
+      synth.cancel();
+      if (currentBtn) {
+        currentBtn.classList.remove("speaking");
+        currentBtn.innerHTML = ICONS.idle;
+        currentBtn.title = "Listen";
+        currentBtn = null;
+      }
+    };
+
+    const toggle = (btn, html, lead) => {
+      if (!synth) return;
+      if (currentBtn === btn) {
+        if (paused) { synth.resume(); paused = false; }
+        else { synth.pause(); paused = true; }
+        paint(); return;
+      }
+      stop();
+      currentBtn = btn; speaking = true; paused = false;
+      queue = toChunks((lead ? lead + ". " : "") + htmlToText(html));
+      speakNext(); paint();
+      markActivity();
+    };
+
+    return { toggle, stop, loadVoices, available: !!synth, icon: ICONS.idle };
+  })();
+
   /* SVG gradient defs (once) */
   const defs = document.createElement("div");
   defs.innerHTML = '<svg style="position:absolute;width:0;height:0" aria-hidden="true"><defs>' +
@@ -126,6 +219,7 @@
 
   /* ---------------- router ---------------- */
   const setView = (html, accent) => {
+    TTS.stop();
     main.innerHTML = html;
     if (accent) main.style.setProperty("--exam-accent", accent);
     else main.style.removeProperty("--exam-accent");
@@ -318,9 +412,32 @@
           <div class="progress-track"><div class="progress-fill" id="chProg"></div></div>
           <span id="chProgLabel"></span>
         </div>
+        ${TTS.available ? `
+        <div class="tts-bar">
+          <span class="tts-label">🎧 Read aloud</span>
+          <select id="ttsVoice" class="tts-select" title="Voice"></select>
+          <button class="btn sm ghost" id="ttsRate" title="Reading speed"></button>
+        </div>` : ""}
       </header>
       <div id="bursts"></div>
       <div id="afterBursts"></div>`, exam.accent);
+
+    /* tts controls */
+    if (TTS.available) {
+      TTS.loadVoices();
+      const rateBtn = document.getElementById("ttsRate");
+      const RATES = [0.9, 1, 1.25, 1.5];
+      const paintRate = () => { rateBtn.textContent = (S.tts.rate || 1) + "×"; };
+      paintRate();
+      rateBtn.addEventListener("click", () => {
+        const i = RATES.indexOf(S.tts.rate || 1);
+        S.tts.rate = RATES[(i + 1) % RATES.length];
+        save(); paintRate();
+      });
+      document.getElementById("ttsVoice").addEventListener("change", (e) => {
+        S.tts.voice = e.target.value; save();
+      });
+    }
 
     paintBursts(exam, ch, content);
   };
@@ -329,6 +446,7 @@
     content.bursts.filter((b) => st.bursts[b.id]).length;
 
   const paintBursts = (exam, ch, content, openId) => {
+    TTS.stop();
     const st = chState(exam.id, ch.id);
     const wrap = document.getElementById("bursts");
     if (!wrap) return;
@@ -352,6 +470,7 @@
         <div class="burst-head" data-toggle="${b.id}">
           <span class="b-idx">${done ? "✓" : i + 1}</span>
           <h3>${esc(b.title)}</h3>
+          ${TTS.available && !locked ? `<button class="listen-btn" data-listen="${b.id}" title="Listen">${TTS.icon}</button>` : ""}
           <span class="b-min">${b.minutes || 5} min read</span>
         </div>
         <div class="burst-body">
@@ -376,7 +495,9 @@
     const after = document.getElementById("afterBursts");
     after.innerHTML = `
       <div class="card overview-card">
-        <h3>📌 Chapter overview — the points that matter</h3>
+        <h3>📌 Chapter overview — the points that matter
+          ${TTS.available ? `<button class="listen-btn" data-listen-overview title="Listen">${TTS.icon}</button>` : ""}
+        </h3>
         <ul>${content.overview.map((p) => `<li>${p}</li>`).join("")}</ul>
       </div>
       <div class="card exam-cta">
@@ -407,6 +528,17 @@
 
     wrap.querySelectorAll("[data-finish]").forEach((btn) =>
       btn.addEventListener("click", () => completeBurst(exam, ch, content, btn.dataset.finish)));
+
+    /* listen buttons */
+    wrap.querySelectorAll("[data-listen]").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const b = content.bursts.find((x) => x.id === btn.dataset.listen);
+        if (b) TTS.toggle(btn, b.html, b.title);
+      }));
+    const ovBtn = after.querySelector("[data-listen-overview]");
+    if (ovBtn) ovBtn.addEventListener("click", () =>
+      TTS.toggle(ovBtn, content.overview.join(". "), `Chapter ${ch.num} overview. The points that matter`));
 
     wireQuizzes(wrap, content, (burstId) => {
       /* called when a whole burst quiz is fully correct */
